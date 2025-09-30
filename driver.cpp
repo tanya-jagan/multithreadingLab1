@@ -30,10 +30,10 @@ int main()
     std::vector<std::thread> consumers;
     for (int i = 0; i < N; i++)
     {
-        consumers.emplace_back([&]
-                               {
-            for(int j = 0; j < (K/N); j++) {
-                q.pop(j); // block if full queue
+        consumers.emplace_back([&] { 
+            int val;
+            for(int j = 0; j < (K/M); j++) {
+                q.pop(val); // block if full queue
             } });
     }
 

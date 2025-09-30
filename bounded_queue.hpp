@@ -41,6 +41,7 @@ public:
 
         // signal that queue has data for consumers
         notEmpty.notify_one();
+        return true;
     }
 
     /**
@@ -65,6 +66,7 @@ public:
 
         // signal that  space is available for producers
         notFull.notify_one();
+        return true;
     }
 
     /**
