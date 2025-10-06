@@ -25,19 +25,19 @@ public:
         }
     }
 
-    /**
-     * blocks until there's space in the queue, throws if queue is clsoed
-     * requirements: use std::mutex and std::condition_variable, support
-     * N producers and M consumers */
+    // blocks until there's space in the queue, throws if queue is closed
     bool push(const T &item)
     {
+        // acquire lock on mutex
         std::unique_lock<std::mutex> lock(mutex);
 
         // wait until queue isn't full or closed - avoids spurious wakeup
-        notFull.wait(lock, [this]
-                     { return queue.size() < capacity_ || closed_; });
+        while(!(queue.size() < capacity_ || closed_))
+        {
+            notFull.wait(lock);
+        }
 
-        // queue closed
+        // no more items allowed if queue closed
         if (closed_)
         {
             return false;
@@ -54,17 +54,17 @@ public:
         return true;
     }
 
-    /**
-     * blocks until there's space in the queue, throws if queue is clsoed
-     * requirements: use std::mutex and std::condition_variable, support
-     * N producers and M consumers */
+    // blocks until there's space in the queue, throws if queue is closed
+    // accepts rvalue reference for move efficiency
     bool push(T &&item)
     {
         std::unique_lock<std::mutex> lock(mutex);
 
         // wait until queue isn't full or closed - avoids spurious wakeup
-        notFull.wait(lock, [this]
-                     { return queue.size() < capacity_ || closed_; });
+        while(!(queue.size() < capacity_ || closed_))
+        {
+            notFull.wait(lock);
+        }
 
         // queue closed
         if (closed_)
@@ -83,25 +83,28 @@ public:
         return true;
     }
 
-    /**
-     * blocks until available item, return false if
-     * queue is closed and empty */
+    // blocks until available item, return false if queue is closed and empty
     bool pop(T &item)
     {
+        // acquire lock on mutex
         std::unique_lock<std::mutex> lock(mutex);
 
         // wait until queue has data or is closed
-        notEmpty.wait(lock, [this]
-                      { return !queue.empty() || closed_; });
+        while(queue.empty() && !closed_)
+        {
+            notEmpty.wait(lock);
+        }
 
-        // stop if empty and closed
-        if (queue.empty())
+        // stop if empty and closed aka end of stream for consumer
+        if (queue.empty() && closed_)
         {
             return false;
         }
 
+        // remove item from front of deque
         item = std::move(queue.front());
         queue.pop_front();
+        // update pop metric
         ++pops_;
 
         // signal that  space is available for producers
@@ -109,17 +112,18 @@ public:
         return true;
     }
 
-    /**
-     * clean shutdown, no more pushes allowed
-     * wakes up all waiting P&C to tell them to get out */
+    // clean shutdown, no more pushes allowed
+    // wakes up all waiting P & C to tell them to get out
     void close()
     {
         {
+            // stop more pushes
             std::lock_guard<std::mutex> lock(mutex);
             closed_ = true;
         }
 
-        // wake up the waiting P&C to check the "closed_" flag
+        // wake up the waiting P & C to check the "closed_" flag
+        // now they can exit if they want
         notFull.notify_all();
         notEmpty.notify_all();
     }
@@ -131,14 +135,15 @@ public:
         return queue.size();
     }
 
-    size_t capacity() const { return capacity_; }
-    uint64_t pushes() const { return pushes_.load(); }
-    uint64_t pops() const { return pops_.load(); }
     bool closed() const
     {
         std::lock_guard<std::mutex> lock(mutex);
         return closed_;
     }
+
+    size_t capacity() const { return capacity_; }
+    uint64_t pushes() const { return pushes_.load(); }
+    uint64_t pops() const { return pops_.load(); }
 
 private:
     const size_t capacity_;

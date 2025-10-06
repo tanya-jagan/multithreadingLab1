@@ -51,7 +51,7 @@ void test_basic_fifo(int P, int C)
     ok = q.pop(x); assert(ok && x == 30);
     assert(q.size() == 0);
 
-    cout << "✅ test_basic_fifo passed\n";
+    cout << "test_basic_fifo passed\n";
 }
 
 // ---------------- Test 2: Backpressure (Blocking Push) ----------------
@@ -78,7 +78,7 @@ void test_backpressure(int P, int C)
 
     producer.join();
     assert(push_done.load());
-    cout << "✅ test_backpressure passed\n";
+    cout << "test_backpressure passed\n";
 }
 
 // ---------------- Test 3: Spurious Wakeup Prevention ----------------
@@ -105,7 +105,7 @@ void test_spurious_wakeup(int P, int C)
     consumer.join();
     producer.join();
     assert(pop_done.load());
-    cout << "✅ test_spurious_wakeup passed\n";
+    cout << "test_spurious_wakeup passed\n";
 }
 
 // ---------------- Test 4: Multi-Producer / Multi-Consumer ----------------
@@ -133,7 +133,7 @@ void test_parallel_produce_consume(int P, int C)
 
     cout << "Produced: " << produced << ", Consumed: " << consumed << endl;
     assert(produced == consumed);
-    cout << "✅ test_parallel_produce_consume passed\n";
+    cout << "test_parallel_produce_consume passed\n";
 }
 
 // ---------------- Test 5: Clean Shutdown ----------------
@@ -158,10 +158,9 @@ void test_shutdown(int P, int C)
 
     cout << "Produced: " << produced << ", Consumed: " << consumed << endl;
     assert(consumed <= produced);
-    cout << "✅ test_shutdown passed\n";
+    cout << "test_shutdown passed\n";
 }
 
-// ---------------- Main with getopt ----------------
 int main(int argc, char *argv[])
 {
     int P = 2, C = 2, test_case = 1;
