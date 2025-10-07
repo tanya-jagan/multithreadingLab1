@@ -106,7 +106,7 @@ public:
         // update pop metric
         ++pops_;
 
-        // signal that  space is available for producers
+        // signal that space is available for producers
         notFull.notify_one();
         return true;
     }
@@ -139,7 +139,6 @@ public:
         std::lock_guard<std::mutex> lock(mutex);
         return closed_;
     }
-
     size_t capacity() const { return capacity_; }
     uint64_t pushes() const { return pushes_.load(); }
     uint64_t pops() const { return pops_.load(); }
