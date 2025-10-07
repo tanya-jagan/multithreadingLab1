@@ -9,133 +9,213 @@
 
 using namespace std;
 
-bool verbose = false;
+// can be set with -pt flag to track progress
+bool progressTracker = false;
 
-// ---------------- Utility: producers & consumers ----------------
-void producerFunc(BoundedQueue<int> &q, int id, int num_items, atomic<int> &produced)
+// producer thread function -- produces numItems items ------------------------------------------------------------------------------------------------------
+void producerFunc(BoundedQueue<int> &q, int id, int numItems, atomic<int> &produced)
 {
-    for (int i = 0; i < num_items; ++i)
+    for (int i = 0; i < numItems; ++i)
     {
-        q.push(i + id * 1000);
+        q.push(i + id * 100); // unique values per producer
         ++produced;
-        if (verbose && i % 100 == 0)
+        if (progressTracker && i % 100 == 0)
+        {
             cout << "Producer " << id << " pushed " << i << endl;
+        }
     }
 }
 
+// consumer thread function -- consumes until queue is closed and empty  ------------------------------------------------------------------------------------
 void consumerFunc(BoundedQueue<int> &q, int id, atomic<int> &consumed)
 {
     int val;
     while (q.pop(val))
     {
         ++consumed;
-        if (verbose && consumed % 100 == 0)
+        if (progressTracker && consumed % 100 == 0)
+        {
             cout << "Consumer " << id << " popped " << val << endl;
+        }
     }
 }
 
-// ---------------- Test 1: Basic FIFO ----------------
-void test_basic_fifo(int P, int C)
+// test 1: basic single-thread FIFO behavior ------------------------------------------------------------------------------------------------
+// single producer, single consumer, small queue
+void testBasicFIFO()
 {
-    (void)P; (void)C; // unused
+    cout << "starting testBasicFIFO\n";
+
     BoundedQueue<int> q(3);
 
-    q.push(10);
-    q.push(20);
-    q.push(30);
+    vector<int> produced{10, 20, 30, 40, 50};
+    vector<int> consumed;
 
-    int x;
-    bool ok;
-    ok = q.pop(x); assert(ok && x == 10);
-    ok = q.pop(x); assert(ok && x == 20);
-    ok = q.pop(x); assert(ok && x == 30);
-    assert(q.size() == 0);
+    thread p([&]()
+             {
+                 for (int val : produced)
+                 {
+                     bool ok = q.push(val);
+                     assert(ok); // should always succeed
+                 }
+                 q.close(); // signal no more items
+             });
 
-    cout << "test_basic_fifo passed\n";
+    thread c([&]()
+             {
+        int val;
+        while (q.pop(val))
+        {
+            consumed.push_back(val);
+        } });
+
+    p.join();
+    c.join();
+
+    if (consumed != produced)
+    {
+        cerr << "Error: consumed items do not match produced items\n";
+        cerr << "Produced: ";
+        for (int v : produced)
+            cerr << v << " ";
+        cerr << "\nConsumed: ";
+        for (int v : consumed)
+            cerr << v << " ";
+        cerr << endl;
+        assert(false);
+    }
+
+    cout << "testBasicFIFO passed!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n";
 }
 
-// ---------------- Test 2: Backpressure (Blocking Push) ----------------
-void test_backpressure(int P, int C)
+// test 2: backpressure (blocking when full) ----------------------------------------------------------------------------------------------
+void testBackPressure()
 {
-    (void)P; (void)C;
-    BoundedQueue<int> q(2);
-    atomic<bool> push_done = false;
+    cout << "starting testBackpressure\n";
 
-    thread producer([&] {
-        q.push(1);
-        q.push(2);
-        // This push should block until a pop occurs
-        q.push(3);
-        push_done = true;
+    const int queueCapacity = 3;
+    BoundedQueue<int> q(queueCapacity);
+    atomic<bool> needToBlock = false;
+    atomic<bool> pushDone = false;
+
+    // producer thread - will block on 4th push    
+    thread producer([&]() {
+        cout << "Producer pushing 1\n";
+        bool ok = q.push(1);
+        assert(ok);
+
+        cout << "Producer pushing 2\n";
+        ok = q.push(2);
+        assert(ok);
+
+        cout << "Producer pushing 3\n";
+        ok = q.push(3);
+        assert(ok);
+
+        needToBlock = true;
+        cout << "Producer pushing 4 (should block)...\n";
+        ok = q.push(4); // should block here until a consumer pops
+        assert(ok);
+        cout << "Producer pushed 4\n";
+        pushDone = true;
     });
 
-    this_thread::sleep_for(chrono::milliseconds(100));
-    assert(!push_done.load()); // should still be blocked
+    while (!needToBlock);
+    cout << "Main thread sleeping 2 seconds to ensure producer is blocked on push(4)\n";
+    this_thread::sleep_for(chrono::seconds(2));
+    assert(!pushDone.load() && "Producer should be blocked on push(4)");
 
+    // consume an item to free up room in the queue
     int val;
     bool ok = q.pop(val);
-    assert(ok && val == 1);
+    assert(ok && val == 1 && "Popped value should be 1");
 
+    // producer should now be able to push 4
     producer.join();
-    assert(push_done.load());
-    cout << "test_backpressure passed\n";
+    assert(pushDone.load() && "Producer should have completed pushing 4 items");
+    cout << "testBackPressure passed\n";
 }
 
 // ---------------- Test 3: Spurious Wakeup Prevention ----------------
-void test_spurious_wakeup(int P, int C)
+void testSpuriousWakeup(int P, int C)
 {
-    (void)P; (void)C;
+    (void)P;
+    (void)C;
     BoundedQueue<int> q(1);
     atomic<bool> pop_done = false;
 
-    thread consumer([&] {
+    thread consumer([&]
+                    {
         int val;
         q.pop(val); // should block until producer pushes
-        pop_done = true;
-    });
+        pop_done = true; });
 
     this_thread::sleep_for(chrono::milliseconds(100));
     assert(!pop_done.load()); // still blocked
 
-    thread producer([&] {
+    thread producer([&]
+                    {
         this_thread::sleep_for(chrono::milliseconds(200));
-        q.push(42);
-    });
+        q.push(42); });
 
     consumer.join();
     producer.join();
     assert(pop_done.load());
-    cout << "test_spurious_wakeup passed\n";
+    cout << "testSpuriousWakeup passed\n";
 }
 
 // ---------------- Test 4: Multi-Producer / Multi-Consumer ----------------
-void test_parallel_produce_consume(int P, int C)
+void testMultiProducerConsumer(int P, int C, int capacity)
 {
-    BoundedQueue<int> q(20);
-    atomic<int> produced = 0, consumed = 0;
-    const int items_per_producer = 1000;
+    cout << "starting testMultiProducerConsumer with " << P << " producers and " << C << " consumers\n";
+    assert(P > 0 && C > 0 && "P and C must be > 0");
 
-    vector<thread> producers, consumers;
+    // const int queueCapacity = 10;
+    const int itemsPerProducer = 1000;
+    BoundedQueue<int> q(capacity);
+    atomic<int> produced = 0;
+    atomic<int> consumed = 0;
 
+    vector<thread> producers;
+    vector<thread> consumers;
+
+    auto start = chrono::high_resolution_clock::now(); // timer start
+
+    // producers start!
     for (int i = 0; i < P; ++i)
-        producers.emplace_back(producerFunc, ref(q), i, items_per_producer, ref(produced));
+    {
+        producers.emplace_back(producerFunc, ref(q), i, itemsPerProducer, ref(produced));
+    }
 
+    // consumers start!
     for (int i = 0; i < C; ++i)
+    {
         consumers.emplace_back(consumerFunc, ref(q), i, ref(consumed));
+    }
 
+    // wait for producers to finish
     for (auto &p : producers)
+    {
         p.join();
+    }
 
-    q.close(); // stop consumers cleanly
+    // close the queue to stop consumers, clean finish
+    q.close();
 
     for (auto &c : consumers)
+    {
         c.join();
+    }
 
-    cout << "Produced: " << produced << ", Consumed: " << consumed << endl;
-    assert(produced == consumed);
-    cout << "test_parallel_produce_consume passed\n";
+    auto end = chrono::high_resolution_clock::now(); // timer stop
+    chrono::duration<double> elapsed = end - start;
+
+    cout << "Produced: " << produced << "\nConsumed: " << consumed
+         << "\nElapsed Time: " << elapsed.count() << " s\n";
+    assert(produced == P * itemsPerProducer && "Produced count mismatch");
+    assert(produced == consumed && "Produced and consumed counts should match");
+    cout << "testMultiProducerConsumer passed successfully!!!!\n";
 }
-
 // ---------------- Test 5: Clean Shutdown ----------------
 void test_shutdown(int P, int C)
 {
@@ -153,8 +233,14 @@ void test_shutdown(int P, int C)
     this_thread::sleep_for(chrono::milliseconds(200));
     q.close(); // simulate external shutdown
 
-    for (auto &p : producers) p.join();
-    for (auto &c : consumers) c.join();
+    for (auto &p : producers)
+    {
+        p.join();
+    }
+    for (auto &c : consumers)
+    {
+        c.join();
+    }
 
     cout << "Produced: " << produced << ", Consumed: " << consumed << endl;
     assert(consumed <= produced);
@@ -163,19 +249,30 @@ void test_shutdown(int P, int C)
 
 int main(int argc, char *argv[])
 {
-    int P = 2, C = 2, test_case = 1;
+    int P = 2, C = 2, test_case = 1, capacity = 10;
     int opt;
-    while ((opt = getopt(argc, argv, "p:c:t:v")) != -1)
+    while ((opt = getopt(argc, argv, "p:c:t:q:v")) != -1)
     {
         switch (opt)
         {
-        case 'p': P = stoi(optarg); break;
-        case 'c': C = stoi(optarg); break;
-        case 't': test_case = stoi(optarg); break;
-        case 'v': verbose = true; break;
+        case 'p':
+            P = stoi(optarg);
+            break;
+        case 'c':
+            C = stoi(optarg);
+            break;
+        case 't':
+            test_case = stoi(optarg);
+            break;
+        case 'q':
+            capacity = stoi(optarg);
+            break;    
+        case 'v':
+            progressTracker = true;
+            break;
         default:
             cerr << "Usage: " << argv[0]
-                 << " -p <producers> -c <consumers> -t <test#> [-v]\n";
+                 << " -p <producers> -c <consumers> -t <test#> -q capacity [-v]\n";
             cerr << "Tests: 1=FIFO, 2=Backpressure, 3=Wakeup, 4=Parallel, 5=Shutdown\n";
             return 1;
         }
@@ -184,6 +281,12 @@ int main(int argc, char *argv[])
     if (P <= 0 || C <= 0)
     {
         cerr << "Error: number of producers and consumers must be > 0\n";
+        return 1;
+    }
+
+    if (capacity <= 0)
+    {
+        cerr << "Error: queue capacity must be > 0\n";
         return 1;
     }
 
@@ -197,11 +300,21 @@ int main(int argc, char *argv[])
 
     switch (test_case)
     {
-    case 1: test_basic_fifo(P, C); break;
-    case 2: test_backpressure(P, C); break;
-    case 3: test_spurious_wakeup(P, C); break;
-    case 4: test_parallel_produce_consume(P, C); break;
-    case 5: test_shutdown(P, C); break;
+    case 1:
+        testBasicFIFO();
+        break;
+    case 2:
+        testBackPressure();
+        break;
+    case 3:
+        testSpuriousWakeup(P, C);
+        break;
+    case 4:
+        testMultiProducerConsumer(P, C, capacity);
+        break;
+    case 5:
+        test_shutdown(P, C);
+        break;
     }
 
     auto end = chrono::high_resolution_clock::now();

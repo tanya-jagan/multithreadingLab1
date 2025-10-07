@@ -9,8 +9,7 @@
 
 /** templated class can hold any data type compiler won't generate code for template
  * until it's instantiated, and implementation in .cpp can't be seen by compiler when
- * generating code so we define the class in the header
- */
+ * generating code so we define the class in the header */
 
 template <typename T>
 class BoundedQueue
